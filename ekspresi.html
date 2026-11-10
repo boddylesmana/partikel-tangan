@@ -94,18 +94,41 @@
 </div>
 
 <script type="module">
-/* offline dulu (folder lib/ & models/), kalau tidak ada baru pakai CDN */
+/* Model AI dimuat di latar. Online: CDN dulu (jauh lebih cepat), cadangan folder lib/ & models/.
+   Di komputer sendiri (localhost): folder lokal dulu, cadangan CDN. */
 const CDN="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-let MP, WASM, MODEL;
-try{ MP=await import("./lib/vision_bundle.mjs"); WASM="lib/wasm"; MODEL="models/face_landmarker.task"; }
-catch(e){ MP=await import(CDN); WASM=CDN+"/wasm";
-  MODEL="https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"; }
-const { FaceLandmarker, FilesetResolver, DrawingUtils }=MP;
+const IS_LOCAL=/^(localhost$|127\.|192\.168\.|10\.|\[::1\])/.test(location.hostname);
+const SRC=[
+  {mod:CDN+"/vision_bundle.mjs", wasm:CDN+"/wasm",
+   model:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"},
+  {mod:"./lib/vision_bundle.mjs", wasm:"lib/wasm", model:"models/face_landmarker.task"}];
+if(IS_LOCAL) SRC.reverse();
+let FaceLandmarker=null, draw=null, mpPromise=null;
+function loadLandmarker(){
+  if(!mpPromise){
+    mpPromise=(async()=>{
+      let lastErr;
+      for(const s of SRC){ for(const delegate of ["GPU","CPU"]){   // GPU gagal di sebagian laptop → CPU
+        try{
+          const MP=await import(s.mod);
+          const vision=await MP.FilesetResolver.forVisionTasks(s.wasm);
+          const lmk=await MP.FaceLandmarker.createFromOptions(vision,{
+            baseOptions:{modelAssetPath:s.model, delegate},
+            runningMode:"VIDEO", numFaces:1, outputFaceBlendshapes:true});
+          FaceLandmarker=MP.FaceLandmarker; draw=new MP.DrawingUtils(hctx);
+          return lmk;
+        }catch(e){ lastErr=e; }
+      }}
+      throw lastErr;
+    })();
+    mpPromise.catch(()=>{ mpPromise=null; });   // gagal → boleh dicoba lagi
+  }
+  return mpPromise;
+}
 
 const $=id=>document.getElementById(id);
 const cam=$("cam"), hud=$("hud"), hctx=hud.getContext("2d");
 let landmarker=null, running=false, lastT=-1, showMesh=true;
-const draw=new DrawingUtils(hctx);
 
 /* nilai yang dihaluskan supaya tidak kedap-kedip */
 const S={smile:0,frown:0,jaw:0,browUp:0,brow:0,squint:0,press:0,geo:0};
@@ -127,27 +150,27 @@ function showMood(m){
 }
 
 async function start(){
-  $("startBtn").disabled=true; $("statTxt").textContent="Memuat model…";
+  $("startBtn").disabled=true; $("err").style.display="none";
+  let stream=null;
   try{
-    if(!landmarker){
-      const vision=await FilesetResolver.forVisionTasks(
-        WASM);
-      landmarker=await FaceLandmarker.createFromOptions(vision,{
-        baseOptions:{modelAssetPath:
-          MODEL,
-          delegate:"GPU"},
-        runningMode:"VIDEO", numFaces:1, outputFaceBlendshapes:true});
-    }
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:640,height:480},audio:false});
-    cam.srcObject=stream; await cam.play();
+    const modelP=loadLandmarker(); modelP.catch(()=>{});   // model & kamera disiapkan bersamaan
+    $("statTxt").textContent="Meminta izin kamera…";
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error("Browser ini tidak mendukung kamera (butuh HTTPS).");
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:640,height:480},audio:false});
+    cam.srcObject=stream; await cam.play();                // kamera langsung terlihat
+    $("statTxt").textContent="Memuat model…"; $("sub").textContent="Memuat model AI, tunggu sebentar…";
+    landmarker=await modelP;
     running=true; $("dot").classList.add("on"); $("statTxt").textContent="Aktif";
     $("startBtn").textContent="Kamera aktif"; trackLoop();
-  }catch(e){ showErr(e); $("startBtn").disabled=false; }
+  }catch(e){
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); cam.srcObject=null; }
+    showErr(e); $("startBtn").disabled=false; }
 }
 function showErr(e){ let m=e?.message||String(e);
   if(/NotAllowed|Permission/i.test(m)) m="Izin kamera ditolak. Izinkan kamera lalu coba lagi.";
   else if(/NotFound/i.test(m)) m="Kamera tidak ditemukan.";
-  else if(/fetch|network|Failed/i.test(m)) m="Gagal memuat model AI. Buka lewat JALANKAN.bat atau pastikan ada internet.";
+  else if(/NotReadable|in use/i.test(m)) m="Kamera sedang dipakai aplikasi lain. Tutup aplikasi itu lalu coba lagi.";
+  else if(/fetch|network|Failed|import/i.test(m)) m="Gagal memuat model AI. Periksa koneksi internet lalu tekan tombol lagi.";
   $("err").textContent="⚠ "+m; $("err").style.display="block"; $("statTxt").textContent="Gagal"; }
 
 function bs(list,name){ const c=list.find(x=>x.categoryName===name); return c?c.score:0; }
@@ -226,6 +249,8 @@ $("startBtn").addEventListener("click",start);
 $("meshBtn").addEventListener("click",()=>{ showMesh=!showMesh; $("meshBtn").textContent="Mesh: "+(showMesh?"ON":"OFF");
   if(!showMesh) hctx.clearRect(0,0,hud.width,hud.height); });
 addEventListener("resize",syncHud);
+/* unduh model AI di latar begitu halaman terbuka, supaya saat tombol ditekan sudah siap */
+setTimeout(()=>{ loadLandmarker().catch(()=>{}); }, 300);
 </script>
 </body>
 </html>

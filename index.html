@@ -104,22 +104,75 @@
 
 <script src="lib/three.min.js" onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js';document.head.appendChild(s)"></script>
 <script type="module">
-/* offline dulu (folder lib/ & models/), kalau tidak ada baru pakai CDN */
+/* Model AI dimuat belakangan (tidak menahan partikel).
+   Online: CDN dulu (jauh lebih cepat), cadangan folder lib/ & models/.
+   Di komputer sendiri (localhost): folder lokal dulu, cadangan CDN. */
 const CDN="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-let MP, WASM, MODEL;
-try{ MP=await import("./lib/vision_bundle.mjs"); WASM="lib/wasm"; MODEL="models/hand_landmarker.task"; }
-catch(e){ MP=await import(CDN); WASM=CDN+"/wasm";
-  MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"; }
-const { HandLandmarker, FilesetResolver }=MP;
+const IS_LOCAL=/^(localhost$|127\.|192\.168\.|10\.|\[::1\])/.test(location.hostname);
+const SRC=[
+  {mod:CDN+"/vision_bundle.mjs", wasm:CDN+"/wasm",
+   model:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"},
+  {mod:"./lib/vision_bundle.mjs", wasm:"lib/wasm", model:"models/hand_landmarker.task"}];
+if(IS_LOCAL) SRC.reverse();
+let mpPromise=null;
+function loadLandmarker(){
+  if(!mpPromise){
+    mpPromise=(async()=>{
+      let lastErr;
+      for(const s of SRC){ for(const delegate of ["GPU","CPU"]){   // GPU gagal di sebagian laptop → CPU
+        try{
+          const {HandLandmarker, FilesetResolver}=await import(s.mod);
+          const vision=await FilesetResolver.forVisionTasks(s.wasm);
+          return await HandLandmarker.createFromOptions(vision,{
+            baseOptions:{modelAssetPath:s.model, delegate}, runningMode:"VIDEO", numHands:1});
+        }catch(e){ lastErr=e; }
+      }}
+      throw lastErr;
+    })();
+    mpPromise.catch(()=>{ mpPromise=null; });   // gagal → boleh dicoba lagi
+  }
+  return mpPromise;
+}
 
 const $ = id => document.getElementById(id);
 const cam = $("cam"), hud = $("hud"), hctx = hud.getContext("2d");
 
 /* ---------- THREE ---------- */
-const canvas = $("scene");
-const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
-renderer.setClearColor(0x05070c, 1);
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+if(!window.THREE){   // three.min.js cadangan (CDN) dimuat menyusul → tunggu sebentar
+  await new Promise(r=>{ const t0=Date.now(), iv=setInterval(()=>{
+    if(window.THREE||Date.now()-t0>15000){ clearInterval(iv); r(); } },50); });
+}
+let canvas = $("scene");
+let renderer=null, ctx2d=null;
+try{
+  renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+  renderer.setClearColor(0x05070c, 1);
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+}catch(e){
+  /* WebGL tidak tersedia di perangkat ini → gambar partikel dengan kanvas 2D biasa */
+  renderer=null;
+  const c2=document.createElement("canvas"); c2.id="scene"; canvas.replaceWith(c2); canvas=c2;
+  ctx2d=canvas.getContext("2d");
+}
+function fitCanvas(){
+  if(renderer){ renderer.setSize(innerWidth,innerHeight); return; }
+  canvas.width=innerWidth; canvas.height=innerHeight;
+  canvas.style.width="100%"; canvas.style.height="100%";
+}
+function render2D(pos,col){
+  const w=canvas.width, h=canvas.height, f=(h/2)/Math.tan(Math.PI/6);
+  ctx2d.globalCompositeOperation="source-over"; ctx2d.fillStyle="#05070c"; ctx2d.fillRect(0,0,w,h);
+  ctx2d.globalCompositeOperation="lighter";
+  const cx=Math.cos(rotX), sx=Math.sin(rotX), cy=Math.cos(rotY), sy=Math.sin(rotY);
+  for(let i=0;i<N;i++){
+    const x=pos[i*3], y=pos[i*3+1], z=pos[i*3+2];
+    const x1=x*cy+z*sy, z1=-x*sy+z*cy, y2=y*cx-z1*sx, z2=y*sx+z1*cx;
+    const d=8-z2; if(d<0.1) continue;
+    const s=f/d, r=Math.max(0.8,0.022*s);
+    ctx2d.fillStyle=`rgb(${col[i*3]*255|0},${col[i*3+1]*255|0},${col[i*3+2]*255|0})`;
+    ctx2d.fillRect(w/2+x1*s-r, h/2-y2*s-r, r*2, r*2);
+  }
+}
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100);
 camera.position.z = 8;
@@ -268,15 +321,17 @@ function animate(){
     col[i*3]=r; col[i*3+1]=g; col[i*3+2]=b;
   }
   geo.attributes.position.needsUpdate=true; geo.attributes.color.needsUpdate=true;
-  renderer.render(scene,camera);
+  if(renderer) renderer.render(scene,camera); else render2D(pos,col);
   $("openMeter").style.width=Math.round(openness*100)+"%";
   $("openVal").textContent=Math.round(openness*100)+"%";
 }
 
 addEventListener("resize",()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight); });
-renderer.setSize(innerWidth,innerHeight);
+  fitCanvas(); });
+fitCanvas();
 buildParticles(N); animate();
+/* unduh model AI di latar begitu halaman terbuka, supaya saat tombol ditekan sudah siap */
+setTimeout(()=>{ loadLandmarker().catch(()=>{}); }, 300);
 
 /* ---------- MediaPipe ---------- */
 let landmarker=null, running=false, lastT=-1;
@@ -284,29 +339,31 @@ const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11]
   [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
 async function start(){
+  let stream=null;
   try{
     $("startBtn").disabled=true; $("startBtn").textContent="Memuat…"; $("err").style.display="none";
-    if(!landmarker){ $("statTxt").textContent="Memuat model AI…";
-      const vision=await FilesetResolver.forVisionTasks(
-        WASM);
-      landmarker=await HandLandmarker.createFromOptions(vision,{
-        baseOptions:{modelAssetPath:
-          MODEL,
-          delegate:"GPU"}, runningMode:"VIDEO", numHands:1}); }
+    const modelP=loadLandmarker(); modelP.catch(()=>{});   // model & kamera disiapkan bersamaan
     $("statTxt").textContent="Meminta izin kamera…";
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:false});
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error("Browser ini tidak mendukung kamera (butuh HTTPS).");
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:false});
     cam.srcObject=stream; await cam.play();
+    $("pip").classList.add("on");                          // kamera langsung terlihat
+    $("statTxt").textContent="Memuat model AI…";
+    landmarker=await modelP;
     running=true; handRot=true; autoSpin=false;
     $("dot").classList.add("on"); $("statTxt").textContent="Terkontrol tangan ✋";
-    $("pip").classList.add("on"); $("startBtn").textContent="Kamera Aktif";
+    $("startBtn").textContent="Kamera Aktif";
     $("hintbar").textContent="☝️1 jari = Bola · ✌️2 = Love · 🤟3 = I Love You · 🖐️ buka telapak = meledak · geser = putar";
     trackLoop();
-  }catch(e){ showErr(e); $("startBtn").disabled=false; $("startBtn").textContent="Nyalakan Kamera"; }
+  }catch(e){
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); cam.srcObject=null; $("pip").classList.remove("on"); }
+    showErr(e); $("startBtn").disabled=false; $("startBtn").textContent="Nyalakan Kamera"; }
 }
 function showErr(e){ let m=e?.message||String(e);
   if(/Permission|NotAllowed/i.test(m)) m="Akses kamera ditolak. Izinkan lewat ikon gembok di address bar, lalu muat ulang.";
   else if(/NotFound/i.test(m)) m="Kamera tidak ditemukan.";
-  else if(/fetch|network|Failed/i.test(m)) m="Gagal memuat model AI. Buka lewat JALANKAN.bat atau pastikan ada internet.";
+  else if(/NotReadable|in use/i.test(m)) m="Kamera sedang dipakai aplikasi lain. Tutup aplikasi itu lalu coba lagi.";
+  else if(/fetch|network|Failed|import/i.test(m)) m="Gagal memuat model AI. Periksa koneksi internet lalu tekan tombol lagi.";
   $("err").textContent="⚠ "+m; $("err").style.display="block"; $("statTxt").textContent="Gagal"; $("dot").classList.remove("on"); }
 
 function trackLoop(){
