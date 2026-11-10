@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bola Partikel Tangan · Boddy Andrian Lesmana</title>
+<style>
+  :root{ --ink:#eaf0fb; --muted:#8a97ad; --accent:#ffb63f; --line:#263040; }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#05070c;color:var(--ink);
+    font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;}
+  #scene{position:fixed;inset:0;display:block;}
+
+  .pip{position:fixed;left:16px;bottom:16px;width:180px;aspect-ratio:4/3;
+    border-radius:12px;overflow:hidden;border:1px solid var(--line);
+    background:#000;z-index:5;box-shadow:0 8px 30px rgba(0,0,0,.5);
+    opacity:0;transition:opacity .4s;}
+  .pip.on{opacity:1;}
+  #cam,#hud{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);}
+  #cam{object-fit:cover;}
+
+  .top{position:fixed;left:0;right:0;top:0;z-index:5;padding:18px 20px;
+    padding-top:max(18px,env(safe-area-inset-top,0));
+    background:linear-gradient(rgba(5,7,12,.7),transparent);pointer-events:none;}
+  .top h1{margin:0;font-size:clamp(1.1rem,3.5vw,1.5rem);font-weight:600;letter-spacing:-.01em;}
+  .top p{margin:3px 0 0;color:var(--muted);font-size:.85rem;max-width:560px;}
+
+  .panel{position:fixed;right:16px;top:16px;z-index:6;width:235px;
+    background:rgba(13,17,26,.82);backdrop-filter:blur(10px);
+    border:1px solid var(--line);border-radius:14px;padding:14px;max-height:94vh;overflow:auto;}
+  .panel h2{margin:0 0 9px;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}
+  .shapes{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px;}
+  .sbtn{font:inherit;font-weight:600;font-size:.85rem;border-radius:9px;padding:9px 6px;cursor:pointer;
+    border:1px solid var(--line);background:#141b27;color:var(--ink);transition:.12s;}
+  .sbtn:hover{border-color:var(--accent);}
+  .sbtn.active{background:var(--accent);color:#1a1205;border-color:var(--accent);}
+  .sbtn.wide{grid-column:1 / -1;}
+  .btn{font:inherit;font-weight:600;width:100%;border-radius:10px;padding:11px;cursor:pointer;
+    border:1px solid var(--accent);background:var(--accent);color:#1a1205;transition:.12s;margin-top:4px;}
+  .btn:hover{filter:brightness(1.07);} .btn:active{transform:scale(.98);} .btn:disabled{opacity:.5;cursor:default;}
+  .stat{display:flex;align-items:center;gap:8px;margin-top:11px;font-size:.82rem;color:var(--muted);}
+  .dot{width:9px;height:9px;border-radius:99px;background:var(--muted);flex:none;}
+  .dot.on{background:#22c58b;box-shadow:0 0 8px #22c58b;}
+  .ctl{margin-top:13px;} hr.sep{border:none;border-top:1px solid var(--line);margin:14px 0 0;}
+  .ctl label{display:flex;justify-content:space-between;font-size:.78rem;color:var(--muted);margin-bottom:5px;}
+  .ctl input[type=range]{width:100%;accent-color:var(--accent);}
+  .swatches{display:flex;gap:8px;margin-top:6px;}
+  .sw{width:26px;height:26px;border-radius:7px;cursor:pointer;border:2px solid transparent;}
+  .sw.active{border-color:#fff;}
+  .meter{height:6px;background:#1b2230;border-radius:99px;overflow:hidden;margin-top:4px;}
+  .meter > i{display:block;height:100%;width:0;background:var(--accent);}
+  .err{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:10;max-width:360px;
+    background:#1a0f10;border:1px solid #ff5d5d;color:#ffc2c2;padding:16px 18px;border-radius:12px;
+    font-size:.9rem;display:none;}
+  .hintbar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:5;
+    color:var(--muted);font-size:.82rem;background:rgba(13,17,26,.6);padding:7px 14px;border-radius:99px;
+    border:1px solid var(--line);text-align:center;}
+  @media (max-width:560px){ .panel{width:calc(100% - 32px);} .pip{width:120px;} }
+</style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div class="top">
+    <h1>Bola Partikel Tangan <span style="color:var(--accent)">· Boddy Andrian Lesmana</span></h1>
+    <p>Pakai jari: ☝️1=Bola · ✌️2=Love · 🤟3=I Love You · 4 jari=Nama · 🖐️buka+jempol=meledak · geser tangan=putar. Atau tekan tombol di panel.</p>
+  </div>
+
+  <div class="pip" id="pip"><video id="cam" autoplay playsinline muted></video><canvas id="hud"></canvas></div>
+
+  <aside class="panel">
+    <h2>Bentuk</h2>
+    <div class="shapes" id="shapes">
+      <button class="sbtn active" data-shape="sphere">● Bola</button>
+      <button class="sbtn" data-shape="heart">♥ Love</button>
+      <button class="sbtn wide" data-shape="text">✍ I LOVE YOU</button>
+      <button class="sbtn wide" data-shape="name">👤 BODDY ANDRIAN LESMANA</button>
+      <button class="sbtn wide" data-shape="auto">▶ Otomatis (muter)</button>
+    </div>
+
+    <hr class="sep">
+    <h2 style="margin-top:14px">Kontrol Tangan</h2>
+    <button class="btn" id="startBtn">Nyalakan Kamera</button>
+    <div class="stat"><span class="dot" id="dot"></span><span id="statTxt">Kamera mati</span></div>
+    <div class="ctl">
+      <label>Dorongan tangan <span id="openVal">0%</span></label>
+      <div class="meter"><i id="openMeter"></i></div>
+    </div>
+
+    <hr class="sep">
+    <div class="ctl" style="margin-top:12px">
+      <label>Jumlah partikel <span id="cntVal">8000</span></label>
+      <input type="range" id="count" min="3000" max="16000" step="1000" value="8000">
+    </div>
+    <div class="ctl">
+      <label>Warna</label>
+      <div class="swatches" id="swatches"></div>
+    </div>
+    <a href="ekspresi.html" style="display:block;margin-top:10px;text-align:center;font-size:.8rem;color:var(--muted);text-decoration:none">😊 Deteksi ekspresi wajah →</a>
+  </aside>
+
+  <div class="err" id="err"></div>
+  <div class="hintbar" id="hintbar">Tip: nyalakan kamera untuk mengontrol dengan tangan ✋</div>
+
+<script src="lib/three.min.js" onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js';document.head.appendChild(s)"></script>
+<script type="module">
+/* offline dulu (folder lib/ & models/), kalau tidak ada baru pakai CDN */
+const CDN="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+let MP, WASM, MODEL;
+try{ MP=await import("./lib/vision_bundle.mjs"); WASM="lib/wasm"; MODEL="models/hand_landmarker.task"; }
+catch(e){ MP=await import(CDN); WASM=CDN+"/wasm";
+  MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"; }
+const { HandLandmarker, FilesetResolver }=MP;
+
+const $ = id => document.getElementById(id);
+const cam = $("cam"), hud = $("hud"), hctx = hud.getContext("2d");
+
+/* ---------- THREE ---------- */
+const canvas = $("scene");
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setClearColor(0x05070c, 1);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100);
+camera.position.z = 8;
+
+const R = 2.3;
+let points, geo, mat;
+let base, curr, dir, scat, rnd, N = 8000;
+
+/* ---------- generator bentuk (mengembalikan Float32Array N*3) ---------- */
+function genSphere(n){
+  const T=new Float32Array(n*3), g=Math.PI*(3-Math.sqrt(5));
+  for(let i=0;i<n;i++){
+    const y=1-(i/(n-1))*2, r=Math.sqrt(1-y*y), th=g*i;
+    T[i*3]=Math.cos(th)*r*R; T[i*3+1]=y*R; T[i*3+2]=Math.sin(th)*r*R;
+  } return T;
+}
+function genHeart(n){
+  const T=new Float32Array(n*3), s=0.14;
+  for(let i=0;i<n;i++){
+    const t=Math.random()*Math.PI*2;
+    let x=16*Math.sin(t)**3;
+    let y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+    const u=Math.sqrt(Math.random());      // isi bagian dalam
+    x*=u*s; y*=u*s;
+    const z=(Math.random()-0.5)*0.7*(0.4+u);   // tebal, lebih tebal di tengah
+    T[i*3]=x; T[i*3+1]=y+0.25; T[i*3+2]=z;
+  } return T;
+}
+const textCache={};
+function buildTextPixels(str, fontPx=150){
+  const c=document.createElement("canvas"); c.width=1600; c.height=360;
+  const x=c.getContext("2d");
+  x.fillStyle="#000"; x.fillRect(0,0,c.width,c.height);
+  x.fillStyle="#fff"; x.textAlign="center"; x.textBaseline="middle";
+  x.font=`bold ${fontPx}px 'Segoe UI',Arial,sans-serif`;
+  const maxW=c.width-60, mw=x.measureText(str).width;
+  if(mw>maxW){ fontPx=Math.floor(fontPx*maxW/mw); x.font=`bold ${fontPx}px 'Segoe UI',Arial,sans-serif`; }
+  x.fillText(str, c.width/2, c.height/2);
+  const data=x.getImageData(0,0,c.width,c.height).data, pts=[];
+  for(let py=0;py<c.height;py+=3){ for(let px=0;px<c.width;px+=3){
+    if(data[(py*c.width+px)*4] > 128) pts.push([px,py]);
+  }}
+  let minX=c.width,maxX=0; for(const [px] of pts){ if(px<minX)minX=px; if(px>maxX)maxX=px; }
+  return {pts, w:c.width, h:c.height, minX, maxX};
+}
+function genTextStr(n,str,fontPx){
+  if(!textCache[str]) textCache[str]=buildTextPixels(str,fontPx);
+  const {pts,w,h,minX,maxX}=textCache[str], T=new Float32Array(n*3);
+  const tw=Math.max(1,maxX-minX), W=6.4, H=W*h/tw, cx=(minX+maxX)/2;
+  for(let i=0;i<n;i++){
+    const [px,py]=pts[(Math.random()*pts.length)|0];
+    T[i*3]=((px-cx)/tw)*W;
+    T[i*3+1]=(0.5-py/h)*H;
+    T[i*3+2]=(Math.random()-0.5)*0.35;
+  } return T;
+}
+const genText=n=>genTextStr(n,"I LOVE YOU",150);
+const genName=n=>genTextStr(n,"BODDY ANDRIAN LESMANA",150);
+const GEN={ sphere:genSphere, heart:genHeart, text:genText, name:genName };
+
+/* ---------- bangun partikel ---------- */
+function buildParticles(n){
+  if(points){ scene.remove(points); geo.dispose(); mat.dispose(); }
+  N=n;
+  base=new Float32Array(N*3); curr=new Float32Array(N*3);
+  dir=new Float32Array(N*3); scat=new Float32Array(N); rnd=new Float32Array(N);
+  for(let i=0;i<N;i++){ scat[i]=1.5+Math.random()*3.5; rnd[i]=0.5+Math.random(); }
+  const col=new Float32Array(N*3).fill(1);
+  geo=new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(curr,3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col,3));
+  mat=new THREE.PointsMaterial({size:0.045, vertexColors:true, transparent:true,
+    opacity:0.95, blending:THREE.AdditiveBlending, depthWrite:false});
+  points=new THREE.Points(geo,mat); scene.add(points);
+  applyShape(currentShape, true);
+}
+
+function applyShape(name, snap){
+  const T=GEN[name](N);
+  for(let i=0;i<N;i++){
+    base[i*3]=T[i*3]; base[i*3+1]=T[i*3+1]; base[i*3+2]=T[i*3+2];
+    // arah sebar = radial dari pusat + jitter
+    let dx=T[i*3], dy=T[i*3+1], dz=T[i*3+2];
+    dx+=(Math.random()-.5)*1.5; dy+=(Math.random()-.5)*1.5; dz+=(Math.random()-.5)*1.5;
+    const l=Math.hypot(dx,dy,dz)||1; dir[i*3]=dx/l; dir[i*3+1]=dy/l; dir[i*3+2]=dz/l;
+    if(snap){ curr[i*3]=base[i*3]; curr[i*3+1]=base[i*3+1]; curr[i*3+2]=base[i*3+2]; }
+  }
+}
+
+/* ---------- state ---------- */
+let currentShape="sphere";
+let openness=0, targetOpen=0;
+let rotX=0.15, rotY=0, targetRotX=0.15, targetRotY=0;
+let autoSpin=true, handRot=false;
+let palette={h:0.09};
+let autoMode=false, autoTimer=0; const AUTO_SEQ=["sphere","heart","text","name"]; let autoIdx=0;
+let gestCount=-1, gestFrames=0;
+let palmX=0.5, palmY=0.5;   // posisi telapak yang sudah dihaluskan   // untuk deteksi gerakan jari (ganti bentuk)
+
+function setShape(name){
+  if(name==="auto"){ autoMode=true; autoTimer=0; autoIdx=0; applyAutoShape(); return; }
+  autoMode=false; currentShape=name; applyShape(name,false);
+  // bentuk & default warna + hadapkan ke depan
+  if(name==="heart"){ palette.h=0.97; setAccent("#ff5a7a"); }
+  else if(name==="text"){ palette.h=0.92; setAccent("#ff7ae0"); }
+  else if(name==="name"){ palette.h=0.55; setAccent("#3fd0ff"); }
+  else { palette.h=0.09; setAccent("#ffb63f"); }
+  syncSwatch();
+  if(name==="sphere"){ autoSpin=!handRot; }
+  else { autoSpin=false; if(!handRot){ targetRotX=0.0; targetRotY=0.0; } } // hadap depan
+  markShapeBtn(name);
+}
+function applyAutoShape(){ currentShape=AUTO_SEQ[autoIdx]; applyShape(currentShape,false);
+  if(currentShape==="heart"){palette.h=0.97;} else if(currentShape==="text"){palette.h=0.92;} else if(currentShape==="name"){palette.h=0.55;} else {palette.h=0.09;}
+  if(currentShape!=="sphere" && !handRot){targetRotX=0;targetRotY=0;} autoSpin=(currentShape==="sphere" && !handRot);
+  markShapeBtn("auto"); }
+
+/* ---------- warna util ---------- */
+function hslToRgb(h,s,l){ let r,g,b; if(s===0){r=g=b=l;} else{
+  const q=l<.5?l*(1+s):l+s-l*s, p=2*l-q, f=t=>{if(t<0)t+=1;if(t>1)t-=1;
+    if(t<1/6)return p+(q-p)*6*t; if(t<1/2)return q; if(t<2/3)return p+(q-p)*(2/3-t)*6; return p;};
+  r=f(h+1/3);g=f(h);b=f(h-1/3);} return [r,g,b]; }
+
+/* ---------- loop ---------- */
+let t=0;
+function animate(){
+  requestAnimationFrame(animate); t+=0.016;
+  if(autoMode){ autoTimer+=0.016; if(autoTimer>4){ autoTimer=0; autoIdx=(autoIdx+1)%AUTO_SEQ.length; applyAutoShape(); } }
+  openness+=(targetOpen-openness)*0.12;
+  if(autoSpin) targetRotY+=0.002;
+  rotX+=(targetRotX-rotX)*0.10; rotY+=(targetRotY-rotY)*0.10;
+  points.rotation.x=rotX; points.rotation.y=rotY;
+
+  const pos=geo.attributes.position.array, col=geo.attributes.color.array;
+  const breathe=1+Math.sin(t*0.8)*0.025;
+  for(let i=0;i<N;i++){
+    const o=openness*rnd[i], amt=o*scat[i]*0.75;
+    const sw=Math.sin(t*1.3+i*0.15)*0.05*openness;
+    const tx=base[i*3]*breathe+dir[i*3]*amt+sw;
+    const ty=base[i*3+1]*breathe+dir[i*3+1]*amt;
+    const tz=base[i*3+2]*breathe+dir[i*3+2]*amt+sw;
+    pos[i*3]+=(tx-pos[i*3])*0.08; pos[i*3+1]+=(ty-pos[i*3+1])*0.08; pos[i*3+2]+=(tz-pos[i*3+2])*0.08;
+    const d=Math.hypot(pos[i*3],pos[i*3+1],pos[i*3+2]);
+    const k=Math.min(1,Math.max(0,(d/R-1)/2.2));
+    const [r,g,b]=hslToRgb((palette.h-k*0.15+1)%1, 0.9, 0.56-k*0.12);
+    col[i*3]=r; col[i*3+1]=g; col[i*3+2]=b;
+  }
+  geo.attributes.position.needsUpdate=true; geo.attributes.color.needsUpdate=true;
+  renderer.render(scene,camera);
+  $("openMeter").style.width=Math.round(openness*100)+"%";
+  $("openVal").textContent=Math.round(openness*100)+"%";
+}
+
+addEventListener("resize",()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); });
+renderer.setSize(innerWidth,innerHeight);
+buildParticles(N); animate();
+
+/* ---------- MediaPipe ---------- */
+let landmarker=null, running=false, lastT=-1;
+const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+async function start(){
+  try{
+    $("startBtn").disabled=true; $("startBtn").textContent="Memuat…"; $("err").style.display="none";
+    if(!landmarker){ $("statTxt").textContent="Memuat model AI…";
+      const vision=await FilesetResolver.forVisionTasks(
+        WASM);
+      landmarker=await HandLandmarker.createFromOptions(vision,{
+        baseOptions:{modelAssetPath:
+          MODEL,
+          delegate:"GPU"}, runningMode:"VIDEO", numHands:1}); }
+    $("statTxt").textContent="Meminta izin kamera…";
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:false});
+    cam.srcObject=stream; await cam.play();
+    running=true; handRot=true; autoSpin=false;
+    $("dot").classList.add("on"); $("statTxt").textContent="Terkontrol tangan ✋";
+    $("pip").classList.add("on"); $("startBtn").textContent="Kamera Aktif";
+    $("hintbar").textContent="☝️1 jari = Bola · ✌️2 = Love · 🤟3 = I Love You · 🖐️ buka telapak = meledak · geser = putar";
+    trackLoop();
+  }catch(e){ showErr(e); $("startBtn").disabled=false; $("startBtn").textContent="Nyalakan Kamera"; }
+}
+function showErr(e){ let m=e?.message||String(e);
+  if(/Permission|NotAllowed/i.test(m)) m="Akses kamera ditolak. Izinkan lewat ikon gembok di address bar, lalu muat ulang.";
+  else if(/NotFound/i.test(m)) m="Kamera tidak ditemukan.";
+  else if(/fetch|network|Failed/i.test(m)) m="Gagal memuat model AI. Buka lewat JALANKAN.bat atau pastikan ada internet.";
+  $("err").textContent="⚠ "+m; $("err").style.display="block"; $("statTxt").textContent="Gagal"; $("dot").classList.remove("on"); }
+
+function trackLoop(){
+  if(!running) return;
+  if(cam.currentTime!==lastT && cam.videoWidth){
+    lastT=cam.currentTime; hud.width=cam.videoWidth; hud.height=cam.videoHeight;
+    const res=landmarker.detectForVideo(cam, performance.now());
+    hctx.clearRect(0,0,hud.width,hud.height);
+    if(res.landmarks&&res.landmarks.length){
+      const lm=res.landmarks[0]; drawHand(lm);
+      const palm=avg(lm,[0,5,9,13,17]);
+      const fc=countExt(lm);                     // jumlah jari (telunjuk..kelingking)
+      // 1/2/3 jari → ganti bentuk (tahan sebentar biar stabil)
+      if(fc===gestCount) gestFrames++; else { gestCount=fc; gestFrames=1; }
+      if(gestFrames===4){
+        const map={1:"sphere",2:"heart",3:"text",4:"name"};
+        if(map[fc] && map[fc]!==currentShape && !autoMode) setShape(map[fc]);
+      }
+      // meledak hanya saat telapak terbuka penuh (4 jari); selain itu bentuk solid
+      targetOpen = (fc>=4 && thumbExt(lm)) ? 1 : 0;
+      palmX+=(palm.x-palmX)*0.35; palmY+=(palm.y-palmY)*0.35;   // redam getaran deteksi
+      targetRotY=(0.5-palmX)*5.5; targetRotX=0.15+(palmY-0.5)*4.0;
+    } else { targetOpen=0; gestCount=-1; gestFrames=0; }
+  }
+  requestAnimationFrame(trackLoop);
+}
+function avg(lm,idx){let x=0,y=0,z=0;for(const i of idx){x+=lm[i].x;y+=lm[i].y;z+=lm[i].z;}
+  const n=idx.length;return{x:x/n,y:y/n,z:z/n};}
+function countExt(lm){ const w=lm[0];
+  const ext=(tip,pip)=> dist3(lm[tip],w) > dist3(lm[pip],w) ? 1:0;   // ujung lebih jauh dari pergelangan = terbuka
+  return ext(8,6)+ext(12,10)+ext(16,14)+ext(20,18); }
+function thumbExt(lm){ return dist3(lm[4],lm[17]) > dist3(lm[2],lm[17])*1.25; }  // jempol menjauh dari kelingking = terbuka
+function dist3(a,b){return Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function drawHand(lm){ hctx.strokeStyle="rgba(63,140,255,.9)"; hctx.lineWidth=3;
+  for(const [a,b] of CONN){hctx.beginPath();hctx.moveTo(lm[a].x*hud.width,lm[a].y*hud.height);
+    hctx.lineTo(lm[b].x*hud.width,lm[b].y*hud.height);hctx.stroke();}
+  hctx.fillStyle="#22c58b"; for(const p of lm){hctx.beginPath();hctx.arc(p.x*hud.width,p.y*hud.height,3,0,7);hctx.fill();} }
+
+/* ---------- UI ---------- */
+$("startBtn").onclick=start;
+$("count").oninput=e=>{ const n=+e.target.value; $("cntVal").textContent=n; buildParticles(n); };
+$("shapes").addEventListener("click",e=>{ const b=e.target.closest(".sbtn"); if(b) setShape(b.dataset.shape); });
+function markShapeBtn(name){ document.querySelectorAll(".sbtn").forEach(s=>
+  s.classList.toggle("active", s.dataset.shape===name)); }
+function setAccent(c){ document.documentElement.style.setProperty("--accent",c); }
+
+const PALETTES=[{name:"Emas",h:0.09,c:"#ffb63f"},{name:"Merah",h:0.97,c:"#ff5a7a"},
+  {name:"Biru",h:0.58,c:"#3f8cff"},{name:"Ungu",h:0.80,c:"#b06bff"}];
+const swEl=$("swatches");
+PALETTES.forEach((p,i)=>{ const d=document.createElement("div");
+  d.className="sw"+(i===0?" active":""); d.style.background=p.c; d.title=p.name; d.dataset.h=p.h;
+  d.onclick=()=>{ palette.h=p.h; setAccent(p.c); syncSwatch(p.h); }; swEl.appendChild(d); });
+function syncSwatch(h){ const hv=(h==null?palette.h:h);
+  document.querySelectorAll(".sw").forEach(s=>s.classList.toggle("active", Math.abs(+s.dataset.h-hv)<0.02)); }
+</script>
+</body>
+</html>

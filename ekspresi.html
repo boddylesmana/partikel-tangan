@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Deteksi Ekspresi · Boddy Andrian Lesmana</title>
+<style>
+  :root{ --ink:#eaf0fb; --muted:#8a97ad; --accent:#9aa7bd; --line:#1c2431; }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#000;color:var(--ink);
+    font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;}
+  body.happy{--accent:#ffb63f;}
+  body.sad{--accent:#4f8cff;}
+  body.surprised{--accent:#c77dff;}
+  body.angry{--accent:#ff5a5a;}
+  body.neutral{--accent:#9aa7bd;}
+
+  .wrap{position:fixed;inset:0;display:grid;grid-template-rows:auto 1fr auto;gap:12px;
+    padding:16px;padding-top:max(16px,env(safe-area-inset-top,0));}
+  header{text-align:center;}
+  header h1{margin:0;font-size:clamp(1rem,3vw,1.3rem);font-weight:600;}
+  header h1 span{color:var(--accent);transition:color .5s;}
+  header p{margin:3px 0 0;color:var(--muted);font-size:.8rem;}
+
+  .center{display:grid;place-items:center;min-height:0;}
+  .box{position:relative;width:min(100%,62vh,560px);aspect-ratio:1/1;background:#000;
+    border-radius:16px;overflow:hidden;border:2px solid var(--accent);
+    box-shadow:0 0 0 1px #000,0 0 40px color-mix(in srgb,var(--accent) 35%,transparent);transition:border-color .5s,box-shadow .5s;}
+  #cam,#hud{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);}
+  #cam{object-fit:cover;}
+  #hud{pointer-events:none;}
+  .mood{position:absolute;left:0;right:0;bottom:0;padding:14px 16px 12px;text-align:center;
+    background:linear-gradient(transparent,rgba(0,0,0,.85));pointer-events:none;}
+  .mood .emoji{font-size:2.4rem;line-height:1;display:inline-block;vertical-align:middle;margin-right:10px;
+    transition:transform .3s;}
+  .mood .label{display:inline-block;vertical-align:middle;font-size:clamp(1.4rem,5vw,2.2rem);font-weight:800;
+    letter-spacing:.08em;color:var(--accent);transition:color .5s;}
+  .mood .sub{display:block;margin-top:4px;color:var(--muted);font-size:.82rem;}
+  .mood.pop .emoji{transform:scale(1.25);}
+
+  footer{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;
+    width:min(100%,62vh,560px);margin:0 auto;}
+  .m{background:#0b0f16;border:1px solid var(--line);border-radius:10px;padding:8px 10px;}
+  .m .row{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted);margin-bottom:4px;}
+  .m .row b{color:var(--ink);}
+  .bar{height:5px;border-radius:3px;background:#141b27;overflow:hidden;}
+  .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s,background .5s;}
+  .ctl{grid-column:1 / -1;display:flex;gap:10px;align-items:center;}
+  .btn{font:inherit;font-weight:600;flex:1;border-radius:10px;padding:10px;cursor:pointer;
+    border:1px solid var(--accent);background:var(--accent);color:#0b0b0b;transition:background .5s;}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .btn.ghost{flex:0 0 auto;background:transparent;color:var(--ink);border-color:var(--line);}
+  .stat{display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--muted);white-space:nowrap;}
+  .dot{width:8px;height:8px;border-radius:50%;background:#555;}
+  .dot.on{background:#3ddc84;box-shadow:0 0 10px #3ddc84;}
+  #err{grid-column:1 / -1;display:none;font-size:.8rem;color:#ff7a7a;}
+  a.link{color:var(--muted);font-size:.75rem;text-decoration:none;}
+  a.link:hover{color:var(--accent);}
+</style>
+</head>
+<body class="neutral">
+<div class="wrap">
+  <header>
+    <h1>Deteksi Ekspresi <span>· Boddy Andrian Lesmana</span></h1>
+    <p>Senyum = Bahagia · Mulut turun = Sedih · Mulut terbuka + alis naik = Kaget · Alis turun + bibir rapat = Marah</p>
+  </header>
+
+  <div class="center">
+    <div class="box" id="box">
+      <video id="cam" autoplay playsinline muted></video>
+      <canvas id="hud"></canvas>
+      <div class="mood" id="mood">
+        <span class="emoji" id="emoji">😐</span><span class="label" id="label">MENUNGGU</span>
+        <span class="sub" id="sub">Nyalakan kamera untuk mulai</span>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="m"><div class="row"><span>Senyum</span><b id="vSmile">0%</b></div><div class="bar"><i id="bSmile"></i></div></div>
+    <div class="m"><div class="row"><span>Mulut turun</span><b id="vFrown">0%</b></div><div class="bar"><i id="bFrown"></i></div></div>
+    <div class="m"><div class="row"><span>Mulut buka</span><b id="vJaw">0%</b></div><div class="bar"><i id="bJaw"></i></div></div>
+    <div class="m"><div class="row"><span>Alis naik</span><b id="vBrowUp">0%</b></div><div class="bar"><i id="bBrowUp"></i></div></div>
+    <div class="m"><div class="row"><span>Alis turun</span><b id="vBrow">0%</b></div><div class="bar"><i id="bBrow"></i></div></div>
+    <div class="m"><div class="row"><span>Mata menyipit</span><b id="vSquint">0%</b></div><div class="bar"><i id="bSquint"></i></div></div>
+    <div class="ctl">
+      <button class="btn" id="startBtn">▶ Nyalakan kamera</button>
+      <button class="btn ghost" id="meshBtn" title="Tampilkan / sembunyikan mesh wajah">Mesh: ON</button>
+      <div class="stat"><span class="dot" id="dot"></span><span id="statTxt">Belum aktif</span></div>
+      <a class="link" href="index.html">← tangan</a>
+    </div>
+    <div id="err"></div>
+  </footer>
+</div>
+
+<script type="module">
+/* offline dulu (folder lib/ & models/), kalau tidak ada baru pakai CDN */
+const CDN="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+let MP, WASM, MODEL;
+try{ MP=await import("./lib/vision_bundle.mjs"); WASM="lib/wasm"; MODEL="models/face_landmarker.task"; }
+catch(e){ MP=await import(CDN); WASM=CDN+"/wasm";
+  MODEL="https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"; }
+const { FaceLandmarker, FilesetResolver, DrawingUtils }=MP;
+
+const $=id=>document.getElementById(id);
+const cam=$("cam"), hud=$("hud"), hctx=hud.getContext("2d");
+let landmarker=null, running=false, lastT=-1, showMesh=true;
+const draw=new DrawingUtils(hctx);
+
+/* nilai yang dihaluskan supaya tidak kedap-kedip */
+const S={smile:0,frown:0,jaw:0,browUp:0,brow:0,squint:0,press:0,geo:0};
+let mood="", moodFrames=0, pendingMood="neutral";
+
+const MOODS={
+  happy:    {emoji:"😊", label:"BAHAGIA", sub:"Senyummu terdeteksi"},
+  sad:      {emoji:"😢", label:"SEDIH",   sub:"Sudut mulutmu turun"},
+  surprised:{emoji:"😮", label:"KAGET",   sub:"Mulut terbuka, alis naik"},
+  angry:    {emoji:"😠", label:"MARAH",   sub:"Alis turun, bibir rapat"},
+  neutral:  {emoji:"😐", label:"NETRAL",  sub:"Coba senyum atau cemberut"},
+  none:     {emoji:"🙈", label:"TIDAK ADA WAJAH", sub:"Hadapkan wajah ke kotak"},
+};
+function showMood(m){
+  if(m===mood) return; mood=m;
+  const d=MOODS[m]; $("emoji").textContent=d.emoji; $("label").textContent=d.label; $("sub").textContent=d.sub;
+  document.body.className = (m==="none")?"neutral":m;
+  $("mood").classList.add("pop"); setTimeout(()=>$("mood").classList.remove("pop"),300);
+}
+
+async function start(){
+  $("startBtn").disabled=true; $("statTxt").textContent="Memuat model…";
+  try{
+    if(!landmarker){
+      const vision=await FilesetResolver.forVisionTasks(
+        WASM);
+      landmarker=await FaceLandmarker.createFromOptions(vision,{
+        baseOptions:{modelAssetPath:
+          MODEL,
+          delegate:"GPU"},
+        runningMode:"VIDEO", numFaces:1, outputFaceBlendshapes:true});
+    }
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:640,height:480},audio:false});
+    cam.srcObject=stream; await cam.play();
+    running=true; $("dot").classList.add("on"); $("statTxt").textContent="Aktif";
+    $("startBtn").textContent="Kamera aktif"; trackLoop();
+  }catch(e){ showErr(e); $("startBtn").disabled=false; }
+}
+function showErr(e){ let m=e?.message||String(e);
+  if(/NotAllowed|Permission/i.test(m)) m="Izin kamera ditolak. Izinkan kamera lalu coba lagi.";
+  else if(/NotFound/i.test(m)) m="Kamera tidak ditemukan.";
+  else if(/fetch|network|Failed/i.test(m)) m="Gagal memuat model AI. Buka lewat JALANKAN.bat atau pastikan ada internet.";
+  $("err").textContent="⚠ "+m; $("err").style.display="block"; $("statTxt").textContent="Gagal"; }
+
+function bs(list,name){ const c=list.find(x=>x.categoryName===name); return c?c.score:0; }
+function ease(k,v){ S[k]+=(v-S[k])*0.3; }
+
+/* kanvas HUD mengikuti area video yang terlihat (object-fit: cover) */
+function syncHud(){
+  const r=$("box").getBoundingClientRect();
+  if(hud.width!==Math.round(r.width)||hud.height!==Math.round(r.height)){ hud.width=Math.round(r.width); hud.height=Math.round(r.height); }
+}
+function mapLm(lm){
+  /* video 640x480 di-cover ke kotak persegi: dipotong kiri-kanan */
+  const vw=cam.videoWidth, vh=cam.videoHeight, s=Math.max(hud.width/vw, hud.height/vh);
+  const dw=vw*s, dh=vh*s, ox=(hud.width-dw)/2, oy=(hud.height-dh)/2;
+  return lm.map(p=>({x:(ox+p.x*dw)/hud.width, y:(oy+p.y*dh)/hud.height, z:p.z}));
+}
+
+function trackLoop(){
+  if(!running) return;
+  if(cam.currentTime!==lastT && cam.videoWidth){
+    lastT=cam.currentTime; syncHud();
+    const res=landmarker.detectForVideo(cam, performance.now());
+    hctx.clearRect(0,0,hud.width,hud.height);
+    if(res.faceLandmarks?.length && res.faceBlendshapes?.length){
+      const lm=res.faceLandmarks[0], b=res.faceBlendshapes[0].categories;
+      if(showMesh) drawMesh(mapLm(lm));
+
+      /* blendshape MediaPipe 0..1 */
+      ease("smile",(bs(b,"mouthSmileLeft")+bs(b,"mouthSmileRight"))/2);
+      ease("frown",(bs(b,"mouthFrownLeft")+bs(b,"mouthFrownRight"))/2);
+      ease("jaw",  bs(b,"jawOpen"));
+      ease("browUp",(bs(b,"browInnerUp")+bs(b,"browOuterUpLeft")+bs(b,"browOuterUpRight"))/3);
+      ease("brow", (bs(b,"browDownLeft")+bs(b,"browDownRight"))/2);
+      ease("squint",(bs(b,"eyeSquintLeft")+bs(b,"eyeSquintRight"))/2);
+      ease("press",(bs(b,"mouthPressLeft")+bs(b,"mouthPressRight"))/2);
+      /* geometri cadangan: sudut mulut (61,291) relatif terhadap tengah bibir (13,14), dinormalisasi tinggi wajah */
+      const midY=(lm[13].y+lm[14].y)/2, cornerY=(lm[61].y+lm[291].y)/2;
+      const faceH=Math.abs(lm[10].y-lm[152].y)||1;
+      ease("geo",(cornerY-midY)/faceH);
+
+      let m="neutral";
+      if(S.jaw>0.45 && S.browUp>0.25)                                 m="surprised";
+      else if(S.smile>0.35)                                           m="happy";
+      else if(S.brow>0.45 && S.smile<0.12 && (S.press>0.2 || S.squint>0.3)) m="angry";
+      else if(S.frown>0.10 || S.geo>0.04 || (S.brow>0.4 && S.smile<0.12)) m="sad";
+
+      if(m===pendingMood) moodFrames++; else { pendingMood=m; moodFrames=1; }
+      if(moodFrames>=5) showMood(m);
+
+      setBar("Smile",S.smile); setBar("Frown",Math.max(S.frown,S.geo*8)); setBar("Jaw",S.jaw);
+      setBar("BrowUp",S.browUp); setBar("Brow",S.brow); setBar("Squint",S.squint);
+    } else {
+      if(pendingMood!=="none"){ pendingMood="none"; moodFrames=1; } else moodFrames++;
+      if(moodFrames>=15) showMood("none");
+    }
+  }
+  requestAnimationFrame(trackLoop);
+}
+function setBar(k,v){ const p=Math.round(Math.min(1,Math.max(0,v))*100);
+  $("v"+k).textContent=p+"%"; $("b"+k).style.width=p+"%"; }
+
+function drawMesh(lm){
+  const acc=getComputedStyle(document.body).getPropertyValue("--accent").trim()||"#fff";
+  draw.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {color:"rgba(255,255,255,.10)", lineWidth:0.6});
+  draw.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,  {color:acc, lineWidth:1.2});
+  draw.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE, {color:acc, lineWidth:1.2});
+  draw.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW, {color:acc, lineWidth:1.2});
+  draw.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,{color:acc, lineWidth:1.2});
+  draw.drawConnectors(lm, FaceLandmarker.FACE_LANDMARKS_LIPS, {color:acc, lineWidth:1.4});
+  /* titik-titik kecil di seluruh wajah */
+  hctx.fillStyle="rgba(255,255,255,.45)";
+  for(const p of lm){ hctx.fillRect(p.x*hud.width-0.6, p.y*hud.height-0.6, 1.2, 1.2); }
+}
+
+$("startBtn").addEventListener("click",start);
+$("meshBtn").addEventListener("click",()=>{ showMesh=!showMesh; $("meshBtn").textContent="Mesh: "+(showMesh?"ON":"OFF");
+  if(!showMesh) hctx.clearRect(0,0,hud.width,hud.height); });
+addEventListener("resize",syncHud);
+</script>
+</body>
+</html>
